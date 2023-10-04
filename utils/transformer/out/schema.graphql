@@ -1,0 +1,280 @@
+type CartShipment @aws_api_key @aws_cognito_user_pools {
+  id: ID
+  assignedStoreId: ID
+  devliverType: String
+  assignedStoreName: String
+  deliveryAddress: DeliveryAddress
+  status: ShipmentStatus
+  lineItems: [LineItem]
+  statusHistory: ShipmentStHistory
+  updatedAt: AWSDateTime!
+  updatedBy: String
+  subTotalProductAmount: Float
+  subTotalTaxAmount: Float
+  subTotalServiceCharge: Float
+  subTotalDiscount: Float
+  createdAt: AWSDateTime!
+  userId: ID
+}
+
+type ShipmentStHistory {
+  fromStatus: String
+  toStatus: String
+  updatedAt: AWSDateTime
+  updatedBy: String
+}
+
+type LineItem {
+  productId: ID
+  productName: String
+  size: Int
+  uom: Int
+  qtyPurchased: Int
+  unitPrice: String
+  totalPrice: String
+  taxes: [Tax]
+  charges: [serviceCharge]
+  discounts: [Discount]
+}
+
+type Tax {
+  taxType: String
+  amount: Float
+}
+
+type serviceCharge {
+  chargeType: String
+  chargeAmount: String
+  taxes: [Tax]
+}
+
+type Discount {
+  DiscountType: String
+  amount: Float
+}
+
+type DeliveryAddress {
+  addrLine1: String!
+  addrLine2: String
+  city: String!
+  state: String
+  country: String!
+  postCode: String
+  latitude: Float
+  longitude: Float
+}
+
+enum ShipmentStatus {
+  Placed
+  Assigned
+  Accepted
+  Picked
+  Delivered
+}
+
+input DeliveryAddressInput {
+  addrLine1: String!
+  addrLine2: String
+  city: String!
+  state: String
+  country: String!
+  postCode: String
+  latitude: Float
+  longitude: Float
+}
+
+input LineItemInput {
+  productId: ID
+  productName: String
+  size: Int
+  uom: Int
+  qtyPurchased: Int
+  unitPrice: String
+  totalPrice: String
+  taxes: [TaxInput]
+  charges: [ServiceChargeInput]
+  discounts: [DiscountInput]
+}
+
+input TaxInput {
+  taxType: String
+  amount: Float
+}
+
+input ServiceChargeInput {
+  chargeType: String
+  chargeAmount: String
+  taxes: [TaxInput]
+}
+
+input DiscountInput {
+  DiscountType: String
+  amount: Float
+}
+
+input ShipmentStHistoryInput {
+  fromStatus: String
+  toStatus: String
+  updatedAt: AWSDateTime
+  updatedBy: String
+}
+
+type Category @aws_cognito_user_pools @aws_api_key {
+  id: ID!
+  type: CategoryType
+  catgName: String!
+  description: String!
+  parentId: ID!
+  sdtAttr: [String]
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+}
+
+enum CategoryType {
+  Major
+  Minor
+}
+
+enum ModelSortDirection {
+  ASC
+  DESC
+}
+
+type ModelCartShipmentConnection {
+  items: [CartShipment]
+  nextToken: String
+}
+
+input ModelStringFilterInput {
+  ne: String
+  eq: String
+  le: String
+  lt: String
+  ge: String
+  gt: String
+  contains: String
+  notContains: String
+  between: [String]
+  beginsWith: String
+}
+
+input ModelIDFilterInput {
+  ne: ID
+  eq: ID
+  le: ID
+  lt: ID
+  ge: ID
+  gt: ID
+  contains: ID
+  notContains: ID
+  between: [ID]
+  beginsWith: ID
+}
+
+input ModelIntFilterInput {
+  ne: Int
+  eq: Int
+  le: Int
+  lt: Int
+  ge: Int
+  gt: Int
+  between: [Int]
+}
+
+input ModelFloatFilterInput {
+  ne: Float
+  eq: Float
+  le: Float
+  lt: Float
+  ge: Float
+  gt: Float
+  between: [Float]
+}
+
+input ModelBooleanFilterInput {
+  ne: Boolean
+  eq: Boolean
+}
+
+input ModelShipmentStatusFilterInput {
+  eq: ShipmentStatus
+  ne: ShipmentStatus
+}
+
+input ModelCartShipmentFilterInput {
+  id: ModelIDFilterInput
+  assignedStoreId: ModelIDFilterInput
+  devliverType: ModelStringFilterInput
+  assignedStoreName: ModelStringFilterInput
+  status: ModelShipmentStatusFilterInput
+  updatedAt: ModelStringFilterInput
+  updatedBy: ModelStringFilterInput
+  subTotalProductAmount: ModelFloatFilterInput
+  subTotalTaxAmount: ModelFloatFilterInput
+  subTotalServiceCharge: ModelFloatFilterInput
+  subTotalDiscount: ModelFloatFilterInput
+  createdAt: ModelStringFilterInput
+  userId: ModelIDFilterInput
+  and: [ModelCartShipmentFilterInput]
+  or: [ModelCartShipmentFilterInput]
+  not: ModelCartShipmentFilterInput
+}
+
+type Query {
+  getCartShipment(id: ID!): CartShipment
+  listCartShipments(filter: ModelCartShipmentFilterInput, limit: Int, nextToken: String): ModelCartShipmentConnection
+}
+
+input CreateCartShipmentInput {
+  id: ID
+  assignedStoreId: ID
+  devliverType: String
+  assignedStoreName: String
+  deliveryAddress: DeliveryAddressInput
+  status: ShipmentStatus
+  lineItems: [LineItemInput]
+  statusHistory: ShipmentStHistoryInput
+  updatedAt: AWSDateTime
+  updatedBy: String
+  subTotalProductAmount: Float
+  subTotalTaxAmount: Float
+  subTotalServiceCharge: Float
+  subTotalDiscount: Float
+  createdAt: AWSDateTime
+  userId: ID
+}
+
+input UpdateCartShipmentInput {
+  id: ID!
+  assignedStoreId: ID
+  devliverType: String
+  assignedStoreName: String
+  deliveryAddress: DeliveryAddressInput
+  status: ShipmentStatus
+  lineItems: [LineItemInput]
+  statusHistory: ShipmentStHistoryInput
+  updatedAt: AWSDateTime
+  updatedBy: String
+  subTotalProductAmount: Float
+  subTotalTaxAmount: Float
+  subTotalServiceCharge: Float
+  subTotalDiscount: Float
+  createdAt: AWSDateTime
+  userId: ID
+}
+
+input DeleteCartShipmentInput {
+  id: ID!
+}
+
+type Mutation {
+  createCartShipment(input: CreateCartShipmentInput!): CartShipment
+  updateCartShipment(input: UpdateCartShipmentInput!): CartShipment
+  deleteCartShipment(input: DeleteCartShipmentInput!): CartShipment
+}
+
+type Subscription {
+  onCreateCartShipment: CartShipment @aws_subscribe(mutations: ["createCartShipment"])
+  onUpdateCartShipment: CartShipment @aws_subscribe(mutations: ["updateCartShipment"])
+  onDeleteCartShipment: CartShipment @aws_subscribe(mutations: ["deleteCartShipment"])
+}

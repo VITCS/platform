@@ -1,0 +1,18 @@
+{
+  "name": "NodeLayer",
+  "version": "2.0.0",
+  "description": "Layer created for  Node Lambda Projects",
+  "main": "index.js",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aws-amplify/graphql-model-transformer": "^0.4.1",
+    "file-type": "^16.5.0",
+    "graphql-auth-transformer": "^6.24.9",
+    "graphql-connection-transformer": "^4.21.9",
+    "graphql-dynamodb-transformer": "^6.22.9",
+    "graphql-elasticsearch-transformer": "^4.11.9",
+    "graphql-transformer-core": "^6.28.9",
+    "js-yaml": "^4.1.0",
+    "read-chunk": "^3.2.0"
+  }
+}

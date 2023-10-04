@@ -1,0 +1,87 @@
+type CartShipment @model @aws_api_key @aws_cognito_user_pools {
+  id: ID
+  assignedStoreId: ID
+  devliverType: String
+  assignedStoreName: String
+  deliveryAddress: DeliveryAddress
+  status: ShipmentStatus
+  lineItems: [LineItem]
+  statusHistory: ShipmentStHistory
+  updatedAt: AWSDateTime!
+  updatedBy: String
+  subTotalProductAmount: Float
+  subTotalTaxAmount: Float
+  subTotalServiceCharge: Float
+  subTotalDiscount: Float
+  createdAt: AWSDateTime!
+  userId: ID
+}
+
+type ShipmentStHistory {
+  fromStatus: String
+  toStatus: String
+  updatedAt: AWSDateTime
+  updatedBy: String
+}
+
+type LineItem {
+  productId: ID
+  productName: String
+  size: Int
+  uom: Int
+  qtyPurchased: Int
+  unitPrice: String
+  totalPrice: String
+  taxes: [Tax]
+  charges: [serviceCharge]
+  discounts: [Discount]
+}
+
+type Tax {
+  taxType: String
+  amount: Float
+}
+
+type serviceCharge {
+  chargeType: String
+  chargeAmount: String
+  taxes: [Tax]
+}
+
+type Discount {
+  DiscountType: String
+  amount: Float
+}
+
+type DeliveryAddress {
+  addrLine1: String!
+  addrLine2: String
+  city: String!
+  state: String
+  country: String!
+  postCode: String
+  latitude: Float
+  longitude: Float
+}
+
+enum ShipmentStatus {
+  Placed
+  Assigned
+  Accepted
+  Picked
+  Delivered
+}
+
+type Category @model @aws_cognito_user_pools @aws_api_key @searchable {
+  id: ID!
+  type: CategoryType
+  catgName: String!
+  description: String!
+  parentId: ID!
+  sdtAttr: [String]
+}
+
+enum CategoryType {
+  Major
+  Minor
+}
