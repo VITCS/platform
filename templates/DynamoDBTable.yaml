@@ -1,0 +1,54 @@
+################################################
+# Template for merchant-api with AppSync
+################################################
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: 'AWS::Serverless-2016-10-31'
+
+################################################
+# Parameters
+################################################
+Parameters:
+  Application:
+    Type: String
+  Module:
+    Type: String
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name
+
+  TableName:
+    Type: String
+
+################################################
+# Resources
+################################################
+Resources:
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ${Application}-${Environment}-${TableName}
+      KeySchema:
+        - AttributeName: <IdField>
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: <IdField>
+          AttributeType: S
+        - AttributeName: <SecondaryIdxField>
+          AttributeType: S
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      GlobalSecondaryIndexes:
+        - IndexName: by<SecondaryIdxField>
+          KeySchema:
+            - AttributeName: <SecondaryIdxField>
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+    DeletionPolicy: Delete
