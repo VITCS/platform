@@ -1,0 +1,44 @@
+version = 0.1
+[dev]
+[dev.deploy]
+[dev.deploy.parameters]
+stack_name = "spirits-dev-platform-location"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-dev-platform-location"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"dev\" LogLevel=\"INFO\" RetentionInDays=\"1\" EventBusName=\"/spirits/dev/platform/eventbus/arn\" NodeLayerArn=\"/spirits/dev/shared/nodelayer/arn\""
+
+[dev2]
+[dev2.deploy]
+[dev2.deploy.parameters]
+stack_name = "spirits-dev2-platform-location"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-dev2-platform-location"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"dev2\" LogLevel=\"INFO\" RetentionInDays=\"1\" EventBusName=\"/spirits/dev2/platform/eventbus/arn\" NodeLayerArn=\"/spirits/dev2/shared/nodelayer/arn\""
+
+[sit]
+[sit.deploy]
+[sit.deploy.parameters]
+stack_name = "spirits-sit-platform-location"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-sit-platform-location"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"sit\" LogLevel=\"INFO\" RetentionInDays=\"1\" EventBusName=\"/spirits/sit/platform/eventbus/arn\" NodeLayerArn=\"/spirits/sit/shared/nodelayer/arn\""
+
+[prd]
+[prd.deploy]
+[prd.deploy.parameters]
+stack_name = "spirits-prd-platform-location"
+s3_bucket = "409907184267-spirits-prd-samdeploy"
+s3_prefix = "spirits-prd-platform-location"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"prd\" LogLevel=\"INFO\" RetentionInDays=\"30\" EventBusName=\"/spirits/prd/platform/eventbus/arn\" NodeLayerArn=\"/spirits/prd/shared/nodelayer/arn\""

@@ -1,0 +1,44 @@
+version = 0.1
+[dev]
+[dev.deploy]
+[dev.deploy.parameters]
+stack_name = "spirits-dev-platform-elasticsearch"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-dev-platform-elasticsearch"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"dev\" ElasticSearchInstanceCount=\"1\" ElasticSearchInstanceType=\"t3.small.elasticsearch\" ElasticSearchEBSVolumeGB=\"10\" LayerArn=\"/spirits/dev/shared/pythonlayer/arn\" CriticalSnsTopicName=\"sabrish-sns-test\" AvailabilityZoneCount=\"2\" "
+
+[dev2]
+[dev2.deploy]
+[dev2.deploy.parameters]
+stack_name = "spirits-dev2-platform-elasticsearch"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-dev2-platform-elasticsearch"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"dev2\" ElasticSearchInstanceCount=\"1\" ElasticSearchInstanceType=\"t3.small.elasticsearch\" ElasticSearchEBSVolumeGB=\"10\" LayerArn=\"/spirits/dev2/shared/pythonlayer/arn\" CriticalSnsTopicName=\"sns-cloudwatch-alerts\" RetentionInDays=\"7\" AvailabilityZoneCount=\"1\" ZoneAwarenessEnabled=\"false\" "
+
+[sit]
+[sit.deploy]
+[sit.deploy.parameters]
+stack_name = "spirits-sit-platform-elasticsearch"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-sit-platform-elasticsearch"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"sit\" ElasticSearchInstanceCount=\"1\" ElasticSearchInstanceType=\"t3.small.elasticsearch\" ElasticSearchEBSVolumeGB=\"10\" LayerArn=\"/spirits/sit/shared/pythonlayer/arn\" CriticalSnsTopicName=\"sns-cloudwatch-alerts\" RetentionInDays=\"14\" AvailabilityZoneCount=\"1\" ZoneAwarenessEnabled=\"false\" "
+
+[prd]
+[prd.deploy]
+[prd.deploy.parameters]
+stack_name = "spirits-prd-platform-elasticsearch"
+s3_bucket = "409907184267-spirits-prd-samdeploy"
+s3_prefix = "spirits-prd-platform-elasticsearch"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"prd\" ElasticSearchInstanceCount=\"3\" ElasticSearchInstanceType=\"t3.small.elasticsearch\" ElasticSearchEBSVolumeGB=\"10\" LayerArn=\"/spirits/prd/shared/pythonlayer/arn\" CriticalSnsTopicName=\"sns-cloudwatch-alerts\" RetentionInDays=\"30\" AvailabilityZoneCount=\"3\" ZoneAwarenessEnabled=\"true\" "

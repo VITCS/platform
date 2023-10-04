@@ -1,0 +1,554 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: 'AWS::Serverless-2016-10-31'
+
+###############################################################################
+#    Parameters
+###############################################################################
+Parameters:
+  Application:
+    Type: String
+  Module:
+    Type: String
+  Environment:
+    Type: String
+    Default: dev2
+    Description: Environment name
+  LogLevel:
+    Type: String
+    Default: INFO
+  RetentionInDays:
+    Type: Number
+    Default: 1
+    Description: CloudWatch Logs retention period for Lambda functions
+  EventBusName:
+    Type: String
+    Description: EventBridge Event Bus Name
+  NodeLayerArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Node Layer NodeDependenciesLayer ARN
+  CriticalSnsTopicName:
+    Type: String
+    Description: SNS Topic Name
+###############################################################################
+#    Globals
+###############################################################################
+Globals:
+  Function:
+    Runtime: nodejs16.x
+    Handler: index.handler
+    Layers:
+      - !Ref NodeLayerArn 
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        EVENT_BUS_NAME: !Ref EventBusName
+        POWERTOOLS_SERVICE_NAME: customerusers
+        POWERTOOLS_TRACE_DISABLED: false
+        LOG_LEVEL: !Ref LogLevel
+#    Layers:
+#      - !Sub arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:2
+
+
+Resources:
+###############################################################################
+#    Customer User Pool
+###############################################################################
+  CustomerUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${Application}-${Environment}-${Module}-customeruserpool
+      AutoVerifiedAttributes: 
+        - email
+        - phone_number
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: phone_number
+          AttributeDataType: String
+          Mutable: true
+          # Required: true
+          Required: false
+        - Name: family_name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: given_name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: middle_name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: fullName
+          DeveloperOnlyAttribute: false
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: addlSignupData
+          DeveloperOnlyAttribute: false
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: addlPaymentDetails
+          DeveloperOnlyAttribute: false
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      AliasAttributes:
+        - email
+        - phone_number
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 7
+      AccountRecoverySetting:
+        RecoveryMechanisms: 
+          - Name: verified_phone_number
+            Priority: 1
+          - Name: verified_email
+            Priority: 2
+      SmsConfiguration:
+        SnsCallerArn: !GetAtt CognitoSNSRole.Arn
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn
+        PostConfirmation: !GetAtt SignUpFunction.Arn
+        PreTokenGeneration: !GetAtt PreTokenGenFunction.Arn
+      UserPoolTags: 
+          Environment: !Ref Environment
+          Application: !Ref Application
+          Module:      !Ref Module
+  
+  UserPoolIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref CustomerUserPool
+      ProviderName: "Google"
+      ProviderDetails:
+        client_id: "886855182339-fj10vb1955sth2083ab0j3pv46osbiaf.apps.googleusercontent.com"
+        client_secret: "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"
+        authorize_scopes: "profile email openid"
+      ProviderType: "Google"
+      AttributeMapping:
+        email: "email"
+        given_name: "given_name"
+        family_name: "family_name"
+
+  CustomerUserPoolNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/customeruserpool/id
+      Type: String
+      Value: !Ref CustomerUserPool
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  CustomerAdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: m-admin
+      UserPoolId: !Ref CustomerUserPool
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CustomerUserPool
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - http://localhost:3000
+      GenerateSecret: false
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      RefreshTokenValidity: 30
+      ExplicitAuthFlows: 
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH   #Enable admin based user password authentication flow
+        - ALLOW_REFRESH_TOKEN_AUTH          # should always be an accepted auth flow
+  CustomerUserPoolClientParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: !Sub /${Application}/${Environment}/${Module}/customeruserpoolclient/id
+        Type: String
+        Value: !Ref UserPoolClient
+        Tags:
+          Environment: !Ref Environment
+          Application: !Ref Application
+          Module:      !Ref Module
+###############################################################################
+#    UserPool Domain
+###############################################################################
+  CustomerUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties: 
+      Domain: !Sub 1800spirits-customer-${Environment}
+      UserPoolId: !Ref CustomerUserPool      
+
+##############################################################################
+##   Cognito unauthenticated identity pool
+##############################################################################
+  CustomerLocationIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Sub ${Application}-${Environment}-${Module}-customerlocationidentitypool
+      AllowUnauthenticatedIdentities: true
+      AllowClassicFlow: false
+      CognitoIdentityProviders: 
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt CustomerUserPool.ProviderName
+          ServerSideTokenCheck: true   ##identity pool checks with the integrated user pools to make sure the user has not been globally signed out or deleted before the identity pool provides an OIDC token or Amazon credentials for the user.
+          
+
+  # Create a role for unauthorized acces to AWS resources. Very limited access. Only allows users in the previously created Identity Pool
+  CognitoUnAuthorizedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: 
+              Federated: cognito-identity.amazonaws.com
+            Action: 
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals: 
+                cognito-identity.amazonaws.com:aud: !Ref CustomerLocationIdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: unauthenticated
+      Policies:
+        - PolicyName: CognitoUnauthorizedPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - Effect: Allow
+                Action:
+                  - mobileanalytics:PutEvents
+                  - cognito-sync:*
+                  - geo:*
+                Resource: "*"
+
+  # Create a role for authorized acces to AWS resources. Control what your user can access. This example only allows Lambda invokation
+  # Only allows users in the previously created Identity Pool
+  CognitoAuthorizedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: 
+              Federated: cognito-identity.amazonaws.com
+            Action: 
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals: 
+                cognito-identity.amazonaws.com:aud: !Ref CustomerLocationIdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+      Policies:
+        - PolicyName: CognitoAuthorizedPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - Effect: Allow
+                Action:
+                  - mobileanalytics:PutEvents
+                  - cognito-sync:*
+                  - cognito-identity:*
+                  - geo:GetMapStyleDescriptor
+                  - geo:GetMapGlyphs
+                  - geo:GetMapSprites
+                  - geo:GetMapTile
+                  - geo:SearchPlaceIndex*
+                  - geo:CalculateRoute
+                  - geo:BatchGetDevicePosition
+                  - geo:GetGeofence
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+  CognitoSNSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: 
+              Service: 
+                - cognito-idp.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CognitoSNSPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - Effect: Allow
+                Action:
+                  - sns:publish
+                Resource: "*"    
+  # Assigns the roles to the Identity Pool
+  IdentityPoolRoleMapping:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref CustomerLocationIdentityPool
+      Roles:
+        authenticated: !GetAtt CognitoAuthorizedRole.Arn
+        unauthenticated: !GetAtt CognitoUnAuthorizedRole.Arn
+
+
+  CustomerLocationIdentityPoolNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/customerlocationidentitypool/id
+      Type: String
+      Value: !Ref CustomerLocationIdentityPool
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+  
+###############################################################################
+#    Functions
+###############################################################################
+
+###############################################################################
+#    PreSignUp
+###############################################################################
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src-presignup
+      Handler: pre_signUp.handler
+      FunctionName: !Sub ${Application}-${Environment}-${Module}-CustomerUserPool-PreSignupFunction      
+      Policies:
+        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*"
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:*
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerProfile
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerContact
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerPayment
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  SignUpLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${SignUpFunction}
+      RetentionInDays: !Ref RetentionInDays
+
+###############################################################################
+#    PostSignUp
+###############################################################################
+  SignUpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src-signup
+      Handler: signup_event.handler
+      FunctionName: !Sub ${Application}-${Environment}-${Module}-CustomerUserPool-SignupFunction
+      Environment:
+        Variables:
+            CustomerProfileTable: !Sub ${Application}-${Environment}-CustomerProfile
+            CustomerContactTable: !Sub ${Application}-${Environment}-CustomerContact
+            CustomerPaymentTable: !Sub ${Application}-${Environment}-CustomerPayment
+            CustomerAddressTable: !Sub ${Application}-${Environment}-CustomerAddress
+            APPLICATION: !Ref Application
+            MODULE: !Ref Module
+            ENVIRONMENT: !Ref Environment
+            EVENT_BUS_NAME: !Ref EventBusName 
+      Policies:
+        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*"
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:*
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerProfile
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerContact
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerPayment
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerAddress
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  SignUpLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${SignUpFunction}
+      RetentionInDays: !Ref RetentionInDays
+
+#############################################################    
+#  Alaram Configuration
+#############################################################    
+  SignUpCriticalErrorAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmDescription: !Sub 'Lambda Critical Error Alarm for ${SignUpFunction}'
+      AlarmName: !Sub '${SignUpFunction}-Lambda-Critical-Error-Alarm'
+      AlarmActions:
+        - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Threshold: 0.25
+      DatapointsToAlarm: 1
+      Metrics:
+        - Id: !Sub "errorPercentage"
+          Expression: "errors / requests * 100"
+          Label: !Sub "${SignUpFunction}-ErrorPercentage"
+          ReturnData: true
+        - Id: errors
+          MetricStat:
+            Metric:
+              Namespace: "AWS/Lambda"
+              MetricName: "Errors"
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Sub '${SignUpFunction}'
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+        - Id: requests
+          MetricStat:
+            Metric:
+              Namespace: "AWS/Lambda"
+              MetricName: "Invocations"
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Sub '${SignUpFunction}'
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+      TreatMissingData: missing
+
+  LamabdaErrorLogsFilter: 
+    Type: AWS::Logs::MetricFilter
+    Properties: 
+      LogGroupName: !Sub "${SignUpLogGroup}"
+      FilterPattern: "?Error"
+      MetricTransformations: 
+        - 
+          MetricValue: "1"
+          MetricNamespace: "LambdaErrors"
+          MetricName: !Sub "${SignUpFunction}"   
+
+  LamabdaErrorLogsFilterAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmDescription: !Sub 'Lambda Logs Error Alarm for ${SignUpFunction}'
+      AlarmName: !Sub '${SignUpFunction}-Lambda-Logs-Error-Alarm'
+      AlarmActions:
+        - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      MetricName: !Sub "${SignUpFunction}" 
+      Namespace: "LambdaErrors"
+      OKActions:
+      - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}'
+      Period: 60
+      Statistic: Sum
+      Threshold: 15
+
+###############################################################################
+#    Pretoken Generation Function
+###############################################################################
+  PreTokenGenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src-pretoken
+      Handler: pre_token.handler
+      FunctionName: !Sub ${Application}-${Environment}-${Module}-CustomerUserPool-PreTokenGenFunction
+      Environment:
+        Variables:
+            TABLE_NAME: !Sub ${Application}-${Environment}-CustomerUserStore
+            APPLICATION: !Ref Application
+            MODULE: !Ref Module
+            ENVIRONMENT: !Ref Environment
+      Policies:
+        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*" 
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-CustomerProfile
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  PreTokenGenLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${PreTokenGenFunction}
+      RetentionInDays: !Ref RetentionInDays
+
+Outputs:
+  CustomerUserPoolId:
+    Description: The ID for the User Pool
+    Value: !Ref CustomerUserPool

@@ -1,0 +1,33 @@
+version = 0.1
+[dev]
+[dev.deploy]
+[dev.deploy.parameters]
+stack_name = "spirits-dev-waf"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-dev-waf"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "EnvironmentName=\"dev\" Scope=\"REGIONAL\" RetentionInDays=\"1\" EnableAWSManagedRulesSQLiRuleSetRule=\"false\""
+
+[sit]
+[sit.deploy]
+[sit.deploy.parameters]
+stack_name = "spirits-sit-waf"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-sit-waf"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "EnvironmentName=\"sit\" Scope=\"REGIONAL\" RetentionInDays=\"14\" EnableAWSManagedRulesSQLiRuleSetRule=\"false\""
+
+[prd]
+[prd.deploy]
+[prd.deploy.parameters]
+stack_name = "spirits-prd-platform-waf"
+s3_bucket = "409907184267-spirits-prd-samdeploy"
+s3_prefix = "spirits-prd-platform-waf"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "EnvironmentName=\"prod\" Scope=\"REGIONAL\" RetentionInDays=\"30\" EnableAWSManagedRulesSQLiRuleSetRule=\"false\""

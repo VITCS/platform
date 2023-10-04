@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: 'AWS::Serverless-2016-10-31'
+
+###############################################################################
+#    Parameters
+###############################################################################
+Parameters:
+  Application:
+    Type: String
+  Module:
+    Type: String
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name
+  LogLevel:
+    Type: String
+    Default: INFO
+  RetentionInDays:
+    Type: Number
+    Default: 1
+    Description: CloudWatch Logs retention period for Lambda functions
+  EventBusName:
+    Type: String
+    Description: EventBridge Event Bus Name
+  NodeLayerArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Node Layer NodeDependenciesLayer ARN
+
+###############################################################################
+#    Globals
+###############################################################################
+Globals:
+  Function:
+    Runtime: nodejs16.x
+    Handler: index.handler
+    Layers:
+      - !Ref NodeLayerArn 
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        EVENT_BUS_NAME: !Ref EventBusName
+        POWERTOOLS_SERVICE_NAME: location
+        POWERTOOLS_TRACE_DISABLED: "false"
+        LOG_LEVEL: !Ref LogLevel
+
+
+Resources:
+###############################################################################
+#    GeoFence Collection
+###############################################################################
+  GeoFence:
+    Type: AWS::Location::GeofenceCollection
+    Properties:
+      CollectionName: !Sub ${Application}-${Environment}-${Module}-geofence
+      Description: Delivery geofence collection
+      PricingPlan: RequestBasedUsage
+
+  GeoFenceNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/location/geofence
+      Type: String
+      Value: !Ref GeoFence
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  LocationMap:
+    Type: AWS::Location::Map
+    Properties:
+      MapName: !Sub ${Application}-${Environment}-${Module}-Esri-map
+      Description: Map resource
+      PricingPlan: RequestBasedUsage
+      #Valid values MobileAssetManagement | MobileAssetTracking | RequestBasedUsage
+      Configuration: 
+        Style: VectorEsriStreets
+        #Valid values VectorEsriStreets, VectorEsriTopographic, VectorEsriNavigation, VectorEsriDarkGrayCanvas, VectorEsriLightGrayCanvas, VectorHereBerlin.
+
+  MapNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/location/Esri/map
+      Type: String
+      Value: !Ref LocationMap
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  LocationMapHere:
+    Type: AWS::Location::Map
+    Properties:
+      MapName: !Sub ${Application}-${Environment}-${Module}-Here-map
+      Description: Map resource Here
+      PricingPlan: RequestBasedUsage
+      #Valid values MobileAssetManagement | MobileAssetTracking | RequestBasedUsage
+      Configuration: 
+        Style: VectorHereBerlin
+        #Valid values VectorEsriStreets, VectorEsriTopographic, VectorEsriNavigation, VectorEsriDarkGrayCanvas, VectorEsriLightGrayCanvas, VectorHereBerlin.
+
+  HereMapNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/location/Here/map
+      Type: String
+      Value: !Ref LocationMapHere
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  StoragePlaceIndex:
+    Type: AWS::Location::PlaceIndex
+    Properties:
+      IndexName: !Sub ${Application}-${Environment}-${Module}-Esri-storagePlaceindex
+      Description: Storage Placeindex resource
+      PricingPlan: RequestBasedUsage
+      DataSource: Esri
+      ##Valid values Esri or Here
+      DataSourceConfiguration:
+        IntendedUse: Storage  
+        #Valid values SingleUse Storage
+
+  StoragePIParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/location/Esri/storage/PI
+      Type: String
+      Value: !Ref StoragePlaceIndex
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  SingleUsePlaceIndex:
+    Type: AWS::Location::PlaceIndex
+    Properties:
+      IndexName: !Sub ${Application}-${Environment}-${Module}-Esri-singleusePlaceindex
+      Description: Singleuse Placeindex resource
+      PricingPlan: RequestBasedUsage
+      DataSource: Esri
+      ##Valid values Esri or Here
+      DataSourceConfiguration:
+        IntendedUse: SingleUse  
+
+  SingleUsePIParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/location/Esri/singleuse/PI
+      Type: String
+      Value: !Ref SingleUsePlaceIndex
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  SingleUseHerePlaceIndex:
+    Type: AWS::Location::PlaceIndex
+    Properties:
+      IndexName: !Sub ${Application}-${Environment}-${Module}-Here-singleusePlaceindex
+      Description: Singleuse Placeindex Here resource
+      PricingPlan: RequestBasedUsage
+      DataSource: Here
+      ##Valid values Esri or Here
+      DataSourceConfiguration:
+        IntendedUse: SingleUse  
+
+  SingleUseHerePIParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/location/Here/singleuse/PI
+      Type: String
+      Value: !Ref SingleUseHerePlaceIndex
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  RouteCalculator:
+    Type: AWS::Location::RouteCalculator
+    Properties:
+      CalculatorName: !Sub ${Application}-${Environment}-${Module}-Esri-routeCalculator
+      Description: RouteCalculator resource
+      PricingPlan: RequestBasedUsage
+      DataSource: Esri
+
+  RouteCalcParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/location/Esri/route
+      Type: String
+      Value: !Ref RouteCalculator
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+##############################################################################
+##   Event rules
+##############################################################################
+
+
+###############################################################################
+#    Functions
+###############################################################################
+ 

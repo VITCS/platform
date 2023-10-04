@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+
+Parameters:
+  Application:
+    Type: String
+  Module:
+    Type: String
+  Environment:
+    Type: String
+    Default: dev
+  LogLevel:
+    Type: String
+    Default: INFO
+  # APIUrl:
+  #   Type: AWS::SSM::Parameter::Value<String>
+  #   Description: Api url for merchant
+  RetentionInDays:
+    Type: Number
+    Default: 30
+    Description: CloudWatch Logs retention period for Lambda functions
+
+Globals:
+  Function:
+    Runtime: nodejs16.x
+    Handler: index.handler
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        POWERTOOLS_SERVICE_NAME: platform
+        POWERTOOLS_TRACE_DISABLED: "false"
+        LOG_LEVEL: !Ref LogLevel
+#    Layers:
+#      - !Sub "arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:2"
+
+Conditions:
+  IsNotProd: !Not [!Equals [!Ref Environment, prod]]
+
+Resources:
+  #############
+  # EVENT BUS #
+  #############
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "${Application}-${Environment}-${Module}-eventbus"
+
+  EventBusNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/eventbus/arn
+      Value: !GetAtt EventBus.Arn
+      Description: String
+      Type: String
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+
+  CognitoUserEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "${Application}-${Environment}-cognitoUser"
+
+  CognitoUserEventBusName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/cognitoUserEventBus/name
+      Value: !GetAtt CognitoUserEventBus.Name
+      Description: String
+      Type: String
+
+  MerchantUpdateProfileEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "${Application}-${Environment}-merchantUpdateProfile"
+
+  MerchantUpdateProfileEventBusName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/merchantUpdateProfileEventBus/name
+      Value: !GetAtt MerchantUpdateProfileEventBus.Name
+      Description: String
+      Type: String
+  
+  ProducerUpdateProfileEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "${Application}-${Environment}-producerUpdateProfile"
+
+  ProducerUpdateProfileEventBusName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/producerUpdateProfileEventBus/name
+      Value: !GetAtt ProducerUpdateProfileEventBus.Name
+      Description: String
+      Type: String
+
+  OrderEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${Application}-${Environment}-createOrder
+
+  OrderEventBusName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/orderEventBus/name
+      Value: !GetAtt OrderEventBus.Name
+      Description: String
+      Type: String
+
+  PaymentEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${Application}-${Environment}-capturePayment
+
+  PaymentEventBusName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/capturePaymentEventBus/name
+      Value: !GetAtt PaymentEventBus.Name
+      Description: String
+      Type: String
+
+  RejectionEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${Application}-${Environment}-rejectionNotification
+
+  RejectionEventBusName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/rejectionEventBus/name
+      Value: !GetAtt RejectionEventBus.Name
+      Description: String
+      Type: String
+
+  UpdateNotificationEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${Application}-${Environment}-updateNotification
+
+  UpdateNotificationEventBusName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/updateNotification/name
+      Value: !GetAtt UpdateNotificationEventBus.Name
+      Description: String
+      Type: String
+
+  # ApiDestination:
+  #   Type: AWS::Events::ApiDestination
+  #   Properties:
+  #     ConnectionArn: !GetAtt ApiDestinationConnection.Arn
+  #     HttpMethod: POST
+  #     InvocationEndpoint: !Sub ${APIUrl}
+
+  # ApiDestinationConnection:
+  #   Type: AWS::Events::Connection
+  #   Properties:
+  #     AuthorizationType: API_KEY
+  #     AuthParameters:
+  #       ApiKeyAuthParameters:
+  #         ApiKeyName: x-api-key
+  #         ApiKeyValue: da2-uf6jizrj6nglniswp5thu7aegq
+
+  # EventBridgeRole: ## Service role to invoke Api Destination
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: events.amazonaws.com
+  #           Action: "sts:AssumeRole"
+  #     Path: /
+  #     Policies:
+  #       - PolicyName: eventbridge-invoke-api-destination
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             - Effect: Allow
+  #               Action: events:InvokeApiDestination
+  #               Resource:
+  #                 - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:api-destination/${ApiDestination}/*"
+
+  # RouteToAppSyncRule:
+  #   Type: AWS::Events::Rule
+  #   Properties:
+  #     EventBusName: !GetAtt OrderEventBus.Name
+  #     EventPattern:
+  #       source:
+  #         - !Sub ${Application}-${Environment}-ManageOrder-Function
+  #       detail-type:
+  #         - Order Status Update
+  #     Targets:
+  #       - Id: appsync-order-update
+  #         Arn: !GetAtt ApiDestination.Arn
+  #         RoleArn: !GetAtt EventBridgeRole.Arn
+  #         InputTransformer:
+  #           InputPathsMap:
+  #             assignedStoreId: "$.detail.input.assignedStoreId"
+  #             createdAt: "$.detail.input.createdAt"
+  #             deliveryType: "$.detail.input.deliveryType"
+  #             orderId: "$.detail.input.orderId"
+  #             shipmentStatus: "$.detail.input.shipmentStatus"
+  #             subTotalProductAmount: "$.detail.input.subTotalProductAmount"
+  #           InputTemplate: |
+  #             {
+  #               "query": "mutation createOrderShipment($input: CreateOrderShipmentInput!) {createOrderShipment(input: $input) {deliveryType subTotalProductAmount orderId assignedStoreId shipmentStatus createdAt}}",
+  #               "operationName": "createOrderShipment",
+  #                 "variables": {
+  #                     "input": {
+  #                         "deliveryType": "<deliveryType>",
+  #                         "subTotalProductAmount": <subTotalProductAmount>,
+  #                         "orderId": "<orderId>",
+  #                         "assignedStoreId": <assignedStoreId>,
+  #                         "shipmentStatus": "<shipmentStatus>",
+  #                         "createdAt": "<createdAt>"
+  #                   }
+  #                 }
+  #             }

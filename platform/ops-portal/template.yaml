@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: 'AWS::Serverless-2016-10-31'
+
+###############################################################################
+#    Parameters
+###############################################################################
+Parameters:
+  Application:
+    Type: String
+  Module:
+    Type: String
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name
+  LogLevel:
+    Type: String
+    Default: INFO
+  RetentionInDays:
+    Type: Number
+    Default: 1
+    Description: CloudWatch Logs retention period for Lambda functions
+  EventBusName:
+    Type: String
+    Description: EventBridge Event Bus Name
+  NodeLayerArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Node Layer NodeDependenciesLayer ARN
+
+###############################################################################
+#    Globals
+###############################################################################
+Globals:
+  Function:
+    Runtime: nodejs16.x
+    Handler: index.handler
+    Layers:
+      - !Ref NodeLayerArn 
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        EVENT_BUS_NAME: !Ref EventBusName
+        POWERTOOLS_SERVICE_NAME: OpsPortal
+        POWERTOOLS_TRACE_DISABLED: "false"
+        LOG_LEVEL: !Ref LogLevel
+
+
+Resources:
+###############################################################################
+#    Ops Portal Pool
+###############################################################################
+  OpsPortalPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${Application}-${Environment}-${Module}-OpsPortalpool
+      AutoVerifiedAttributes: 
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: userName
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      UserPoolTags: 
+          Environment: !Ref Environment
+          Application: !Ref Application
+          Module:      !Ref Module
+      LambdaConfig:
+          PostConfirmation: !GetAtt SignUpFunction.Arn
+          PreTokenGeneration: !GetAtt PreTokenGenFunction.Arn
+ 
+  OpsPortalPoolNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/OpsPortalpool/id
+      Type: String
+      Value: !Ref OpsPortalPool
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  OpsPortalGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: m-admin
+      UserPoolId: !Ref OpsPortalPool
+
+  OpsPortalPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref OpsPortalPool
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - http://localhost:3000
+      GenerateSecret: false
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      RefreshTokenValidity: 30
+
+
+###############################################################################
+#    Ops Portal UserPool Domain
+###############################################################################
+  OpsPortalPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties: 
+      Domain: !Sub 1800spirits-opsportal-${Environment}
+      UserPoolId: !Ref OpsPortalPool      
+###############################################################################
+#    Functions
+###############################################################################
+  SignUpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      FunctionName: !Sub ${Application}-${Environment}-${Module}-OpsPortalPool-SignupFunction       
+      Policies:
+        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*"
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  SignUpLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${SignUpFunction}"
+      RetentionInDays: !Ref RetentionInDays
+
+###############################################################################
+#    Pretoken Generation Function
+###############################################################################
+  PreTokenGenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: pre_token.handler
+      FunctionName: !Sub ${Application}-${Environment}-${Module}-OpsPortalPool-PreTokenGenFunction
+      Environment:
+        Variables:
+            TABLE_NAME: !Sub ${Application}-${Environment}-OpsPortalGroup
+            APPLICATION: !Ref Application
+            MODULE: !Ref Module
+            ENVIRONMENT: !Ref Environment     
+      Policies:
+        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*" 
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-OpsPortal"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-OpsPortal/index/byUser"
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module:      !Ref Module
+
+  PreTokenGenLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${PreTokenGenFunction}"
+      RetentionInDays: !Ref RetentionInDays
+
+
+
+
+Outputs:
+  OpsPortalPoolId:
+    Description: "The ID for the User Pool"
+    Value: !Ref OpsPortalPool

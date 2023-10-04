@@ -1,0 +1,657 @@
+#####################################################
+# Template for creating Elastic Search Domain
+#####################################################
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+
+Parameters:
+  Application:
+    Type: String
+  Module:
+    Type: String
+  Environment:
+    Type: String
+    Default: dev
+  LogLevel:
+    Type: String
+    Default: INFO
+  RetentionInDays:
+    Type: Number
+    Default: 1
+    Description: CloudWatch Logs retention period for Lambda functions
+  ElasticSearchInstanceCount:
+    Type: Number
+    Description: The number of instances to launch into the Elasticsearch domain.
+    Default: 1
+  ElasticSearchInstanceType:
+    Type: String
+    Description: The type of instance to launch into the Elasticsearch domain.
+    Default: t3.small.elasticsearch
+    AllowedValues:
+      - t3.small.elasticsearch
+  ElasticSearchEBSVolumeGB:
+    Type: Number
+    Description: The size in GB of the EBS volumes that contain our data.
+    Default: 10
+  LayerArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Node Layer NodeDependenciesLayer ARN
+  CriticalSnsTopicName:
+    Type: String
+    Description: SNS Topic Name
+  AvailabilityZoneCount:
+    Type: Number
+    Description: Number of Availability Zones to deploy the ES Domain
+    Default: 1
+  ZoneAwarenessEnabled:
+    Type: String
+    Description: Enable ZoneAwarenes
+    Default: false
+
+Globals:
+  Function:
+    Runtime: nodejs16.x
+    Handler: index.handler
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        POWERTOOLS_SERVICE_NAME: platform
+        POWERTOOLS_TRACE_DISABLED: "false"
+        LOG_LEVEL: !Ref LogLevel
+#    Layers:
+#      - !Sub "arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:2"
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, prd]
+  IsPrimary: !Equals [!Ref AWS::Region, "us-east-1"]
+
+#####################################################
+# Resources
+#####################################################
+Resources:
+  CognitoESUserPool:
+    Type: "AWS::Cognito::UserPool"
+    Properties:
+      UserPoolName: !Sub ${Application}-${Environment}-esuserpool
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_LINK
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref CognitoESUserPool
+      Domain: !Sub ${Application}-${Environment}-es
+  CognitoESIdentityPool:
+    Type: "AWS::Cognito::IdentityPool"
+    Properties:
+      IdentityPoolName: !Sub ${Application}-${Environment}-ESIdentityPool
+      AllowUnauthenticatedIdentities: false
+  CognitoAccessForAmazonES:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - es.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonESCognitoAccess"
+  CognitoIDPAuthRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref CognitoESIdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": authenticated
+      Policies:
+        - PolicyDocument: '{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Action": [ "mobileanalytics:PutEvents", "cognito-sync:*", "cognito-identity:*"], "Resource": ["*"] } ] }'
+          PolicyName: !Sub "IDP_Auth_Policy_${Application}-${Environment}-es"
+  CognitoIDPUnAuthRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref CognitoESIdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": unauthenticated
+      Policies:
+        - PolicyDocument: '{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Action": [ "mobileanalytics:PutEvents", "cognito-sync:*" ], "Resource": [ "*" ] } ] }'
+          PolicyName: !Sub "IDP_UnAuth_Policy_${Application}-${Environment}-es"
+  #####################################################
+  # ElasticSearch Domain
+  #####################################################
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref CognitoESIdentityPool
+      Roles:
+        "authenticated": !GetAtt CognitoIDPAuthRole.Arn
+        "unauthenticated": !GetAtt CognitoIDPUnAuthRole.Arn
+  KibanaAdminRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - es.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonESFullAccess"
+  KibanaUserRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - es.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonESReadOnlyAccess"
+
+  ElasticSearchDomain:
+    Type: AWS::Elasticsearch::Domain
+    Properties:
+      CognitoOptions:
+        Enabled: true
+        IdentityPoolId: !Ref CognitoESIdentityPool
+        RoleArn: !GetAtt CognitoAccessForAmazonES.Arn
+        UserPoolId: !Ref CognitoESUserPool
+      AccessPolicies:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt CognitoIDPAuthRole.Arn
+            Action: "es:*"
+            Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${Application}-${Environment}-es/*"
+      DomainName: !Sub ${Application}-${Environment}-es
+      ElasticsearchVersion: "7.10"
+      ElasticsearchClusterConfig:
+        InstanceCount: !Ref ElasticSearchInstanceCount
+        InstanceType: !Ref ElasticSearchInstanceType
+        ZoneAwarenessEnabled: !Ref ZoneAwarenessEnabled
+        ZoneAwarenessConfig: !If
+          - IsProd
+          - AvailabilityZoneCount: !Ref AvailabilityZoneCount
+          - !Ref "AWS::NoValue"
+      EBSOptions:
+        EBSEnabled: true
+        VolumeType: gp2
+        VolumeSize:
+          Ref: ElasticSearchEBSVolumeGB
+      Tags:
+        - Key: "Environment"
+          Value: !Ref Environment
+        - Key: "Application"
+          Value: !Ref Application
+        - Key: "Module"
+          Value: !Ref Module
+
+  ElasticSearchDomainNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/elasticsearch/domain/endpoint
+      Value: !Sub https://${ElasticSearchDomain.DomainEndpoint}
+      Description: String
+      Type: String
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+
+  ElasticSearchDomainParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/elasticsearch/domain
+      Value: !Sub ${ElasticSearchDomain.DomainEndpoint}
+      Description: String
+      Type: String
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+  #####################################################
+  # ElasticSearch IAM Role
+  #####################################################
+  ElasticSearchAccessIAMRole:
+    Condition: IsPrimary
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-${Environment}-ES-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: "Environment"
+          Value: !Ref Environment
+        - Key: "Application"
+          Value: !Ref Application
+        - Key: "Module"
+          Value: !Ref Module
+      Policies:
+        - PolicyName: ElasticsearchAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - es:ESHttpPost
+                  - es:ESHttpDelete
+                  - es:ESHttpHead
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                Effect: Allow
+                Resource: !Sub ${ElasticSearchDomain.DomainArn}/*
+
+  #####################################################
+  # ElasticSearch Streaming IAM Role
+  #####################################################
+  ElasticSearchStreamingLambdaIAMRole:
+    Condition: IsPrimary
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-${Environment}-ES-Streaming-Lambda-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: "Environment"
+          Value: !Ref Environment
+        - Key: "Application"
+          Value: !Ref Application
+        - Key: "Module"
+          Value: !Ref Module
+      Policies:
+        - PolicyName: ElasticsearchAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - es:ESHttpPost
+                  - es:ESHttpDelete
+                  - es:ESHttpHead
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Effect: Allow
+                Resource: "*"
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  #####################################################
+  # ElasticSearch Streaming Lambda Function
+  #####################################################
+  ElasticSearchStreamingLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${Application}-${Environment}-ElasticSearch-Streaming-Lambda-Function
+      CodeUri: ./src
+      Handler: pythonstreaminges.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref LayerArn
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/${Application}-${Environment}-ES-Streaming-Lambda-Role
+
+      Environment:
+        Variables:
+          ES_ENDPOINT: !Sub https://${ElasticSearchDomain.DomainEndpoint}
+          ES_REGION: !Ref AWS::Region
+          DEBUG: false
+          ES_USE_EXTERNAL_VERSIONING: "false"
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+    Metadata:
+      BuildMethod: python3.9
+    DependsOn:
+      - ElasticSearchDomain
+
+  ElasticSearchStreamingLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ElasticSearchStreamingLambdaFunction}"
+      RetentionInDays: !Ref RetentionInDays
+
+  #############################################################
+  #  Alaram Configuration
+  #############################################################
+  LambdaCriticalErrorAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      ActionsEnabled: true
+      AlarmDescription: !Sub "Lambda Critical Error Alarm for ${ElasticSearchStreamingLambdaFunction}"
+      AlarmName: !Sub "${ElasticSearchStreamingLambdaFunction}-Lambda-Critical-Error-Alarm"
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Threshold: 0.25
+      DatapointsToAlarm: 1
+      Metrics:
+        - Id: !Sub "errorPercentage"
+          Expression: "errors / requests * 100"
+          Label: !Sub "${ElasticSearchStreamingLambdaFunction}-ErrorPercentage"
+          ReturnData: true
+        - Id: errors
+          MetricStat:
+            Metric:
+              Namespace: "AWS/Lambda"
+              MetricName: "Errors"
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Sub "${ElasticSearchStreamingLambdaFunction}"
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+        - Id: requests
+          MetricStat:
+            Metric:
+              Namespace: "AWS/Lambda"
+              MetricName: "Invocations"
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Sub "${ElasticSearchStreamingLambdaFunction}"
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+      TreatMissingData: missing
+
+  LamabdaErrorLogsFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "${ElasticSearchStreamingLambdaLogGroup}"
+      FilterPattern: "?Error"
+      MetricTransformations:
+        - MetricValue: "1"
+          MetricNamespace: "LambdaErrors"
+          MetricName: !Sub "${ElasticSearchStreamingLambdaFunction}"
+
+  LamabdaErrorLogsFilterAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      ActionsEnabled: true
+      AlarmDescription: !Sub "Lambda Logs Error Alarm for ${ElasticSearchStreamingLambdaFunction}"
+      AlarmName: !Sub "${ElasticSearchStreamingLambdaFunction}-Lambda-Logs-Error-Alarm"
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      MetricName: !Sub "${ElasticSearchStreamingLambdaFunction}"
+      Namespace: "LambdaErrors"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Sum
+      Threshold: 15
+
+  #########################################################
+  ##  Elastic Search Domain Alarms
+  #########################################################
+  ClusterStatusYellowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Replica shards for at least one index are not allocated to nodes in a cluster."
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "ClusterStatus.yellow"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Maximum
+      Threshold: 0
+  ClusterStatusRedAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Primary and replica shards of at least one index are not allocated to nodes in a cluster."
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "ClusterStatus.red"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Maximum
+      Threshold: 0
+  ClusterCPUUtilizationTooHighAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Average CPU utilization over last 10 minutes too high."
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "CPUUtilization"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 600
+      Statistic: Average
+      Threshold: 80
+  ClusterCPUCreditBalanceTooLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Average CPU credit balance over last 10 minutes too low, expect a significant performance drop soon."
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: CPUCreditBalance
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 600
+      Statistic: Average
+      Threshold: 20
+  ClusterFreeStorageSpaceTooLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Cluster is running out of storage space."
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "FreeStorageSpace"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Minimum
+      Threshold: 2000 # 2 Gigabyte in Megabyte
+  ClusterIndexWritesBlockedTooHighAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Cluster is blocking incoming write requests."
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "ClusterIndexWritesBlocked"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Maximum
+      Threshold: 0
+  ClusterJVMMemoryPressureTooHighAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Average JVM memory pressure over last 10 minutes too high."
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "JVMMemoryPressure"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 600
+      Statistic: Average
+      Threshold: 80
+  ClusterMasterNotReachableFromNodeAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Master node stopped or not reachable. Usually the result of a network connectivity issue or AWS dependency problem."
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "MasterReachableFromNode"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+  ClusterAutomatedSnapshotFailureTooHighAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "No automated snapshot was taken for the domain in the previous 36 hours."
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "AutomatedSnapshotFailure"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Maximum
+      Threshold: 0
+  ClusterKibanaHealthyNodesTooLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      AlarmDescription: "Kibana is inaccessible."
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+        - Name: DomainName
+          Value: !Ref ElasticSearchDomain
+      EvaluationPeriods: 1
+      MetricName: "KibanaHealthyNodes"
+      Namespace: "AWS/ES"
+      OKActions:
+        - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${CriticalSnsTopicName}"
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+  #########################################################
+  ##  End of Elastic Search Domain Alarms
+  #########################################################
+
+Outputs:
+  ElasticsearchDomainArn:
+    Description: Elasticsearch instance Domain ARN.
+    Value: !Sub ${ElasticSearchDomain.DomainEndpoint}
+  ElasticsearchDomainEndpoint:
+    Description: Elasticsearch instance Domain Endpoint.
+    Value: !Sub https://${ElasticSearchDomain.DomainEndpoint}

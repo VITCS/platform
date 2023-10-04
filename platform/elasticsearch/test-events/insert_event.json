@@ -1,0 +1,13 @@
+{
+    Records: [
+      {
+        eventID: '10380fe849c4ef0500209551ac8fa4ea',
+        eventName: 'INSERT',
+        eventVersion: '1.1',
+        eventSource: 'aws:dynamodb',
+        awsRegion: 'us-east-1',
+        dynamodb: [Object],
+        eventSourceARN: 'arn:aws:dynamodb:us-east-1:843219620739:table/spirits-dev-Store/stream/2021-06-02T17:21:18.109'
+      }
+    ]
+  }

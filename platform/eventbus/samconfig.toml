@@ -1,0 +1,44 @@
+version = 0.1
+[dev]
+[dev.deploy]
+[dev.deploy.parameters]
+stack_name = "spirits-dev-platform-eventbus"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-dev-platform-eventbus"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"dev\" LogLevel=\"INFO\" APIUrl=\"/spirits/dev/merchant/merchantapi/url\" RetentionInDays=\"1\""
+
+[dev2]
+[dev2.deploy]
+[dev2.deploy.parameters]
+stack_name = "spirits-dev2-platform-eventbus"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-dev2-platform-eventbus"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"dev2\" LogLevel=\"INFO\" RetentionInDays=\"1\""
+
+[sit]
+[sit.deploy]
+[sit.deploy.parameters]
+stack_name = "spirits-sit-platform-eventbus"
+s3_bucket = "843219620739-spirits-dev-samdeploy"
+s3_prefix = "spirits-sit-platform-eventbus"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"sit\" LogLevel=\"INFO\" APIUrl=\"/spirits/sit/merchant/merchantapi/url\" RetentionInDays=\"1\""
+
+[prd]
+[prd.deploy]
+[prd.deploy.parameters]
+stack_name = "spirits-prd-platform-eventbus"
+s3_bucket = "409907184267-spirits-prd-samdeploy"
+s3_prefix = "spirits-prd-platform-eventbus"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Application=\"spirits\" Module=\"platform\" Environment=\"prd\" LogLevel=\"INFO\" APIUrl=\"/spirits/prd/merchant/merchantapi/url\" RetentionInDays=\"30\""

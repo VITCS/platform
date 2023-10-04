@@ -1,0 +1,273 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: "AWS::Serverless-2016-10-31"
+
+###############################################################################
+#    Parameters
+###############################################################################
+Parameters:
+  Application:
+    Type: String
+  Module:
+    Type: String
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name
+  LogLevel:
+    Type: String
+    Default: INFO
+  RetentionInDays:
+    Type: Number
+    Default: 1
+    Description: CloudWatch Logs retention period for Lambda functions
+  EventBusName:
+    Type: String
+    Description: EventBridge Event Bus Name
+  NodeLayerArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Node Layer NodeDependenciesLayer ARN
+
+###############################################################################
+#    Globals
+###############################################################################
+Globals:
+  Function:
+    Runtime: nodejs16.x
+    Handler: index.handler
+    Layers:
+      - !Ref NodeLayerArn
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        EVENT_BUS_NAME: !Ref EventBusName
+        POWERTOOLS_SERVICE_NAME: InternalOps
+        POWERTOOLS_TRACE_DISABLED: "false"
+        LOG_LEVEL: !Ref LogLevel
+
+Resources:
+  ###############################################################################
+  #    Internal Ops Pool
+  ###############################################################################
+  InternalOpsPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${Application}-${Environment}-${Module}-internalOpspool
+      AutoVerifiedAttributes:
+        - email
+        - phone_number
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: phone_number
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: family_name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: given_name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: middle_name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      AliasAttributes:
+        - email
+        - phone_number
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 7
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_phone_number
+            Priority: 1
+          - Name: verified_email
+            Priority: 2
+      SmsConfiguration:
+        SnsCallerArn: !GetAtt CognitoSNSRole.Arn
+      UserPoolTags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+      LambdaConfig:
+        PostConfirmation: !GetAtt SignUpFunction.Arn
+        PreTokenGeneration: !GetAtt PreTokenGenFunction.Arn
+
+  InternalOpsPoolNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/${Environment}/${Module}/internalOpspool/id
+      Type: String
+      Value: !Ref InternalOpsPool
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+
+  InternalOpsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: m-admin
+      UserPoolId: !Ref InternalOpsPool
+
+  InternalOpsPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref InternalOpsPool
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - http://localhost:3000
+      GenerateSecret: false
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      RefreshTokenValidity: 30
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH #Enable admin based user password authentication flow
+        - ALLOW_REFRESH_TOKEN_AUTH
+  ###############################################################################
+  #    Ops Portal UserPool Domain
+  ###############################################################################
+  InternalOpsPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub 1800spirits-internalops-${Environment}
+      UserPoolId: !Ref InternalOpsPool
+
+  CognitoSNSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cognito-idp.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CognitoSNSPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:publish
+                Resource: "*"
+  ###############################################################################
+  #    Functions
+  ###############################################################################
+  SignUpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      FunctionName: !Sub ${Application}-${Environment}-${Module}-InternalOpsPool-SignupFunction
+      Environment:
+        Variables:
+          InternalOpsTable: !Sub ${Application}-${Environment}-InternalOps
+          APPLICATION: !Ref Application
+          MODULE: !Ref Module
+          ENVIRONMENT: !Ref Environment
+          EVENT_BUS_NAME: !Ref EventBusName
+      Policies:
+        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*"
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:*
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-InternalOps
+
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+
+  SignUpLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${SignUpFunction}"
+      RetentionInDays: !Ref RetentionInDays
+
+  ###############################################################################
+  #    Pretoken Generation Function
+  ###############################################################################
+  PreTokenGenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: pre_token.handler
+      FunctionName: !Sub ${Application}-${Environment}-${Module}-InternalOpsPool-PreTokenGenFunction
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${Application}-${Environment}-InternalOpsGroup
+          APPLICATION: !Ref Application
+          MODULE: !Ref Module
+          ENVIRONMENT: !Ref Environment
+      Policies:
+        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-InternalOps"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Application}-${Environment}-InternalOps/index/byUser"
+      Tags:
+        Environment: !Ref Environment
+        Application: !Ref Application
+        Module: !Ref Module
+
+  PreTokenGenLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${PreTokenGenFunction}"
+      RetentionInDays: !Ref RetentionInDays
+
+Outputs:
+  InternalOpsPoolId:
+    Description: "The ID for the User Pool"
+    Value: !Ref InternalOpsPool
